@@ -1,8 +1,7 @@
 from flask_sqlalchemy import SQLAlchemy
-from __main__ import app
 
 # init db
-db = SQLAlchemy(app)
+db = SQLAlchemy()
 
 class User(db.Model):
     __tablename__ = 'users'
@@ -33,5 +32,3 @@ class Product(db.Model):
     #     self.description = description
     #     self.price = price
     #     self.qty = qty
-
-db.create_all()

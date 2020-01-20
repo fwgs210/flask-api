@@ -7,6 +7,7 @@ from flask_cors import CORS
 import os
 import uuid
 import jwt
+from flask_sqlalchemy import SQLAlchemy
 
 # init app
 app = Flask(__name__)
@@ -17,7 +18,11 @@ app.config['SQLALCHEMY_DATABASE_URI'] = 'postgres://wfadnpqa:dwGPR7uApefy9_yEGKr
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SECRET_KEY'] = 'tracysuproject'
 
-from models import Product, User, db
+db = SQLAlchemy(app)
+
+from models import Product, User
+
+db.create_all()
 
 # init marshmallow
 ma = Marshmallow(app)
