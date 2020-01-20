@@ -3,6 +3,7 @@ from flask_marshmallow import Marshmallow
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime, timedelta
 from functools import wraps
+from flask_cors import CORS
 import os
 import uuid
 import jwt
@@ -10,8 +11,9 @@ import jwt
 # init app
 app = Flask(__name__)
 
+CORS(app)
 # db setup
-app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://root:root@localhost:8889/flask_sql'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'postgres://wfadnpqa:dwGPR7uApefy9_yEGKrMyY9as9-z8LVv@rajje.db.elephantsql.com:5432/wfadnpqa'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SECRET_KEY'] = 'tracysuproject'
 
@@ -49,6 +51,14 @@ class ProductSchema(ma.Schema):
 # init schema
 product_schema = ProductSchema()
 products_schema = ProductSchema(many=True)
+
+class UserSchema(ma.Schema):
+      class Meta:
+        fields = ('public_id', 'username', 'admin')
+        
+# init schema
+user_schema = UserSchema()
+users_schema = UserSchema(many=True)
 
 # routes
 @app.route('/product', methods=['POST'])
@@ -117,28 +127,15 @@ def update_product(id):
 def get_all_users(current_user):
 
     if not current_user.admin:
-        return jsonify({'message' : 'Cannot perform that function!'})
+        return jsonify({'message' : 'You dont have access!'})
 
     users = User.query.all()
 
-    output = []
-
-    for user in users:
-        user_data = {}
-        user_data['public_id'] = user.public_id
-        user_data['username'] = user.username
-        user_data['password'] = user.password
-        user_data['admin'] = user.admin
-        output.append(user_data)
-
-    return jsonify({'users' : output})
+    return jsonify({'users' : users_schema.dump(users)})
 
 @app.route('/user/<public_id>', methods=['GET'])
 @token_required
 def get_one_user(current_user, public_id):
-
-    if not current_user.admin:
-        return jsonify({'message' : 'Cannot perform that function!'})
 
     user = User.query.filter_by(public_id=public_id).first()
 
@@ -149,21 +146,31 @@ def get_one_user(current_user, public_id):
         }
         
         return make_response(jsonify(responseObject)), 401
-    
-    user_data = {}
-    user_data['public_id'] = user.public_id
-    user_data['username'] = user.username
-    user_data['password'] = user.password
-    user_data['admin'] = user.admin
-    
+
     responseObject = {
         'status': 'success',
         'data': {
-            'user': user_data
+            'user': user_schema.dump(user)
         }
     }
     
     return make_response(jsonify(responseObject)), 200
+
+@app.route('/user/<public_id>', methods=['PUT'])
+@token_required
+def promote_user(current_user, public_id):
+    if not current_user.admin:
+        return jsonify({'message' : 'Cannot perform that function!'})
+
+    user = User.query.filter_by(public_id=public_id).first()
+
+    if not user:
+        return jsonify({'message' : 'No user found!'})
+
+    user.admin = True
+    db.session.commit()
+
+    return jsonify({'message' : 'The user has been promoted!'})
 
 @app.route('/user', methods=['POST'])
 def create_user():
@@ -202,6 +209,7 @@ def login():
         
         responseObject = {
             'status': 'success',
+            'public_id': user.public_id,
             'token' : token.decode('UTF-8')
         }
     
