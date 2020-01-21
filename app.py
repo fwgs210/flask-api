@@ -1,4 +1,5 @@
 from flask import Flask, request, jsonify, make_response
+from flask_restplus import Api, Resource, fields
 from flask_marshmallow import Marshmallow
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime, timedelta
@@ -24,6 +25,16 @@ from models import Product, User
 
 db.create_all()
 
+authorizations = {
+    'user_token': {
+        'type': 'apiKey',
+        'in': 'header',
+        'name': 'x-access-token'
+    }
+}
+api = Api(app, authorizations=authorizations,
+    security='user_token',)
+
 # init marshmallow
 ma = Marshmallow(app)
 
@@ -36,17 +47,29 @@ def token_required(f):
             token = request.headers['x-access-token']
 
         if not token:
-            return jsonify({'message' : 'Token is missing!'}), 401
+            return {'message' : 'Token is missing!'}, 401
 
         try: 
             data = jwt.decode(token, app.config['SECRET_KEY'])
             current_user = User.query.filter_by(public_id=data['public_id']).first()
         except:
-            return jsonify({'message' : 'Token is invalid!'}), 401
+            return {'message' : 'Token is invalid!'}, 401
 
-        return f(current_user, *args, **kwargs)
+        return f(*args, **kwargs)
 
     return decorated
+
+def token_decode(token): 
+    if not token:
+        return None
+
+    try: 
+        data = jwt.decode(token, app.config['SECRET_KEY'])
+        current_user = User.query.filter_by(public_id=data['public_id']).first()
+        return current_user
+    except:
+        return None
+        
 
 # product schema
 class ProductSchema(ma.Schema):
@@ -64,6 +87,13 @@ class UserSchema(ma.Schema):
 # init schema
 user_schema = UserSchema()
 users_schema = UserSchema(many=True)
+
+
+
+user_login_model = api.model('User_Login', {
+    'username': fields.String(required=True, description='user username'),
+    'password': fields.String(required=True, description='user password')
+})
 
 # routes
 @app.route('/product', methods=['POST'])
@@ -127,100 +157,118 @@ def update_product(id):
         return make_response(jsonify(responseObject)), 401
     
 
-@app.route('/users', methods=['GET'])
-@token_required
-def get_all_users(current_user):
-
-    if not current_user.admin:
-        return jsonify({'message' : 'You dont have access!'})
-
-    users = User.query.all()
-
-    return jsonify({'users' : users_schema.dump(users)})
-
-@app.route('/user/<public_id>', methods=['GET'])
-@token_required
-def get_one_user(current_user, public_id):
-
-    user = User.query.filter_by(public_id=public_id).first()
-
-    if not user:
-        responseObject = {
-            'status': 'error',
-            'message' : 'No user found!'
-        }
+@api.route('/users')
+class AllUsers(Resource):
+    @api.doc('auth_token')
+    @token_required
+    def get(self):
+        current_user = token_decode(request.headers['x-access-token'])
         
-        return make_response(jsonify(responseObject)), 401
+        if not current_user.admin:
+            return jsonify({'message' : 'You dont have access!'})
 
-    responseObject = {
-        'status': 'success',
-        'data': {
+        users = User.query.all()
+
+        return {'users' : users_schema.dump(users)}, 200
+
+
+@api.route('/user/<public_id>')
+class UserById(Resource):
+    @api.doc('auth_token')
+    @token_required
+    def get(self, public_id):
+
+        user = User.query.filter_by(public_id=public_id).first()
+        if not user:
+            responseObject = {
+                'status': 'error',
+                'message' : 'No user found!'
+            }
+            
+            return responseObject, 401
+        
+        return {
+            'status': 'success',
             'user': user_schema.dump(user)
-        }
-    }
-    
-    return make_response(jsonify(responseObject)), 200
+        }, 200
 
-@app.route('/user/<public_id>', methods=['PUT'])
-@token_required
-def promote_user(current_user, public_id):
-    if not current_user.admin:
-        return jsonify({'message' : 'Cannot perform that function!'})
+    @api.doc('auth_token')
+    @token_required
+    def put(self, public_id):
+        current_user = token_decode(request.headers['x-access-token'])
+        
+        if not current_user.admin:
+            return jsonify({'message' : 'You dont have access!'})
 
-    user = User.query.filter_by(public_id=public_id).first()
+        user = User.query.filter_by(public_id=public_id).first()
 
-    if not user:
-        return jsonify({'message' : 'No user found!'})
+        if not user:
+            return {'message' : 'No user found!'}, 401
 
-    user.admin = True
-    db.session.commit()
+        user.admin = True
+        db.session.commit()
 
-    return jsonify({'message' : 'The user has been promoted!'})
+        return {'message' : 'The user has been promoted!'}, 200
 
-@app.route('/user', methods=['POST'])
-def create_user():
-    # if not current_user.admin:
-    #     return jsonify({'message' : 'Cannot perform that function!'})
+@api.route('/register')
+class Register(Resource):
+    @api.expect(user_login_model, validate=True)
+    def post(self):
 
-    data = request.get_json()
+        data = request.get_json()
 
-    hashed_password = generate_password_hash(data['password'], method='sha256')
+        hashed_password = generate_password_hash(data['password'], method='sha256')
 
-    new_user = User(public_id=str(uuid.uuid4()), username=data['username'], password=hashed_password, admin=False)
-    db.session.add(new_user)
-    db.session.commit()
-    
-    responseObject = {
-            'status': 'success',
-            'message' : 'New user created!'
-        }
-    
-    return make_response(jsonify(responseObject)), 200
-
-@app.route('/login', methods=['POST'])
-def login():
-    auth = request.get_json()
-
-    if not auth or not auth.get('username') or not auth.get('password'):
-        return make_response('Make sure you enter your username and password', 401, {'WWW-Authenticate' : 'Basic realm="Login required!"'})
-
-    user = User.query.filter_by(username=auth.get('username')).first()
-
-    if not user:
-        return make_response('User not found', 401, {'WWW-Authenticate' : 'Basic realm="Login required!"'})
-
-    if check_password_hash(user.password, auth.get('password')):
-        token = jwt.encode({'public_id' : user.public_id}, app.config['SECRET_KEY'])
+        new_user = User(public_id=str(uuid.uuid4()), username=data['username'], password=hashed_password, admin=False)
+        db.session.add(new_user)
+        db.session.commit()
         
         responseObject = {
-            'status': 'success',
-            'public_id': user.public_id,
-            'token' : token.decode('UTF-8')
-        }
-    
-        return make_response(jsonify(responseObject)), 200
+                'status': 'success',
+                'message' : 'New user created!'
+            }
+        
+        return responseObject, 201
 
-    return make_response('Password wrong', 401, {'WWW-Authenticate' : 'Basic realm="Login required!"'})
+
+# @api.route('/login')
+# class UserLogin(Resource):
+#     """
+#         User Login Resource
+#     """
+#     @api.doc('user login')
+#     @api.expect(user_auth, validate=True)
+#     def post(self):
+#         # get the post data
+#         post_data = request.json
+#         return Auth.login_user(data=post_data)
+
+
+@api.route('/login')
+class Login(Resource):
+    @api.expect(user_login_model, validate=True)
+    def post(self):
+        auth = api.payload
+
+        if not auth or not auth.get('username') or not auth.get('password'):
+            return make_response('Make sure you enter your username and password', 401, {'WWW-Authenticate' : 'Basic realm="Login required!"'})
+
+        user = User.query.filter_by(username=auth.get('username')).first()
+
+        if not user:
+            return make_response('User not found', 401, {'WWW-Authenticate' : 'Basic realm="Login required!"'})
+
+        if check_password_hash(user.password, auth.get('password')):
+            token = jwt.encode({'public_id' : user.public_id}, app.config['SECRET_KEY'])
+            
+        
+            return {
+                'status': 'success',
+                'public_id': user.public_id,
+                'token' : token.decode('UTF-8')
+            }, 200
+
+        return make_response('Password wrong', 401, {'WWW-Authenticate' : 'Basic realm="Login required!"'})
 
 # run server
 if __name__ == '__main__':
