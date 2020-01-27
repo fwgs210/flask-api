@@ -1,19 +1,16 @@
-from flask_sqlalchemy import SQLAlchemy
-
-# init db
-db = SQLAlchemy()
+from main import db
 
 class User(db.Model):
     __tablename__ = 'users'
     
     id = db.Column(db.Integer, primary_key=True)
     public_id = db.Column(db.String(50), unique=True)
-    username = db.Column(db.String(50))
+    username = db.Column(db.String(50), unique=True)
     password = db.Column(db.String(80))
     admin = db.Column(db.Boolean)
     
     def __repr__(self):
-        return '<Task %r>' % self.id
+        return '<User %r>' % self.id
 
 
 # product 
@@ -25,10 +22,7 @@ class Product(db.Model):
     qty = db.Column(db.Integer)
     
     def __repr__(self):
-        return '<Task %r>' % self.id
-    
-    # def __init__(self, name, description, price, qty):
-    #     self.name = name
-    #     self.description = description
-    #     self.price = price
-    #     self.qty = qty
+        return '<Prodcut %r>' % self.id
+
+
+db.create_all()

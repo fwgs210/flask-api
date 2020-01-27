@@ -1,30 +1,15 @@
-from flask import Flask, request, jsonify, make_response
+from flask import request, jsonify, make_response
 from flask_restplus import Api, Resource, fields
 from flask_marshmallow import Marshmallow
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime, timedelta
-from functools import wraps
-from flask_cors import CORS
 import os
 import uuid
 import jwt
-from flask_sqlalchemy import SQLAlchemy
-
-# init app
-app = Flask(__name__)
-
-CORS(app)
-# db setup
-app.config['SQLALCHEMY_DATABASE_URI'] = 'postgres://wfadnpqa:dwGPR7uApefy9_yEGKrMyY9as9-z8LVv@rajje.db.elephantsql.com:5432/wfadnpqa'
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['SECRET_KEY'] = 'tracysuproject'
-app.config.SWAGGER_UI_DOC_EXPANSION = 'list'
-
-db = SQLAlchemy(app)
-
-from models import Product, User
-
-db.create_all()
+from main import app, db
+from models.model import Product, User
+from util.decorators import token_required, admin_required
+from util.auth import token_decode
 
 authorizations = {
     'user_token': {
@@ -33,44 +18,12 @@ authorizations = {
         'name': 'x-access-token'
     }
 }
+
 api = Api(app, authorizations=authorizations,
     security='user_token',)
 
 # init marshmallow
 ma = Marshmallow(app)
-
-def token_required(f):
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        token = None
-
-        if 'x-access-token' in request.headers:
-            token = request.headers['x-access-token']
-
-        if not token:
-            return {'message' : 'Token is missing!'}, 401
-
-        try: 
-            data = jwt.decode(token, app.config['SECRET_KEY'])
-            current_user = User.query.filter_by(public_id=data['public_id']).first()
-        except:
-            return {'message' : 'Token is invalid!'}, 401
-
-        return f(*args, **kwargs)
-
-    return decorated
-
-def token_decode(token): 
-    if not token:
-        return None
-
-    try: 
-        data = jwt.decode(token, app.config['SECRET_KEY'])
-        current_user = User.query.filter_by(public_id=data['public_id']).first()
-        return current_user
-    except:
-        return None
-        
 
 # product schema
 class ProductSchema(ma.Schema):
@@ -161,7 +114,7 @@ def update_product(id):
 @api.route('/users')
 class AllUsers(Resource):
     @api.doc('auth_token')
-    @token_required
+    @admin_required
     def get(self):
         current_user = token_decode(request.headers['x-access-token'])
         
@@ -194,13 +147,8 @@ class UserById(Resource):
         }, 200
 
     @api.doc('auth_token')
-    @token_required
+    @admin_required
     def put(self, public_id):
-        current_user = token_decode(request.headers['x-access-token'])
-        
-        if not current_user.admin:
-            return jsonify({'message' : 'You dont have access!'})
-
         user = User.query.filter_by(public_id=public_id).first()
 
         if not user:
@@ -210,6 +158,16 @@ class UserById(Resource):
         db.session.commit()
 
         return {'message' : 'The user has been promoted!'}, 200
+
+    @api.doc('auth_token')
+    @admin_required
+    def delete(self, public_id):   
+             
+        user = User.query.filter_by(public_id=public_id).delete()
+        db.session.commit()
+
+        return {'message' : 'The user has been deleted.'}, 200
+    
 
 @api.route('/register')
 class Register(Resource):
@@ -261,11 +219,11 @@ class Login(Resource):
 
         if check_password_hash(user.password, auth.get('password')):
             token = jwt.encode({'public_id' : user.public_id}, app.config['SECRET_KEY'])
-            
-        
+                    
             return {
                 'status': 'success',
                 'public_id': user.public_id,
+                'access': 'member' if not user.admin else 'admin',
                 'token' : token.decode('UTF-8')
             }, 200
 
