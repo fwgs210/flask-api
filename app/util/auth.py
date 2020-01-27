@@ -1,6 +1,6 @@
 import jwt
-from models.model import User
-from main import app
+from app.models.model import User
+from app.main import app
 
 def token_decode(token): 
     if not token:

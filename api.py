@@ -6,10 +6,10 @@ from datetime import datetime, timedelta
 import os
 import uuid
 import jwt
-from main import app, db
-from models.model import Product, User
-from util.decorators import token_required, admin_required
-from util.auth import token_decode
+from app.main import app, db
+from app.models.model import Product, User
+from app.util.decorators import token_required, admin_required
+from app.util.auth import token_decode
 
 authorizations = {
     'user_token': {
